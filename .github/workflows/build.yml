@@ -1,0 +1,96 @@
+name: Build OreMC Fruits
+
+on:
+workflow_dispatch:
+push:
+branches:
+- main
+
+permissions:
+contents: read
+
+jobs:
+build:
+name: Compile Plugin
+runs-on: ubuntu-latest
+
+steps:
+  - name: Checkout Repository
+    uses: actions/checkout@v4
+
+  - name: Setup Java 21
+    uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: '21'
+      cache: maven
+
+  - name: Install ZIP Tools
+    run: sudo apt-get update && sudo apt-get install -y unzip
+
+  - name: Find and Extract Source ZIP
+    shell: bash
+    run: |
+      set -e
+
+      ZIP=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
+
+      if [ -z "$ZIP" ]; then
+        echo "::error::No source ZIP found in repository root."
+        exit 1
+      fi
+
+      mkdir -p extracted
+      unzip -q "$ZIP" -d extracted
+
+      echo "Source extracted successfully."
+
+  - name: Locate Maven Project
+    shell: bash
+    run: |
+      set -e
+
+      POM=$(find extracted -type f -name pom.xml | head -n 1)
+
+      if [ -z "$POM" ]; then
+        echo "::error::No pom.xml found inside source ZIP."
+        find extracted -maxdepth 4 -type f | head -n 100
+        exit 1
+      fi
+
+      PROJECT_DIR=$(dirname "$POM")
+
+      echo "POM=$POM" >> "$GITHUB_ENV"
+      echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      echo "Found Maven project: $PROJECT_DIR"
+
+  - name: Build OreMC Fruits
+    run: mvn --batch-mode --no-transfer-progress -f "$POM" clean package -DskipTests
+
+  - name: Find Generated JAR
+    shell: bash
+    run: |
+      set -e
+
+      mkdir -p release
+
+      JAR=$(find "$PROJECT_DIR/target" -maxdepth 1 -type f -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar" | head -n 1)
+
+      if [ -z "$JAR" ]; then
+        echo "::error::Build finished but no JAR was generated."
+        exit 1
+      fi
+
+      cp "$JAR" release/OreMCFruits.jar
+
+      echo "Generated plugin:"
+      ls -lh release/OreMCFruits.jar
+
+  - name: Upload Final Plugin
+    uses: actions/upload-artifact@v4
+    with:
+      name: OreMCFruits-JAR
+      path: release/OreMCFruits.jar
+      if-no-files-found: error
+      retention-days: 7
